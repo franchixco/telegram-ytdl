@@ -322,4 +322,4 @@ bot.catch((error) => {
 	console.error("Error in bot", error);
 });
 
-bot.start();
+// bot.start();
