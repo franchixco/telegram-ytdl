@@ -177,18 +177,31 @@ bot.on("message:text", async (ctx) => {
 
 			if (formats.length > 0) {
 				const formatButtons = formats.map((format) => {
+					const details = [
+						format.resolution,
+						format.ext,
+						format.vcodec,
+						format.acodec !== 'none' ? format.acodec : null,
+						format.format_note
+					].filter(Boolean).join(' - ');
 					return {
-						text: `${format.format_note} (${format.resolution})`,
+						text: details,
 						callback_data: `format:${format.format_id}:${info.id}`,
-					}
-				})
+					};
+				});
 
 				const audioButtons = audioFormats.map((format) => {
+					const details = [
+						'Audio',
+						format.ext,
+						format.acodec,
+						format.abr ? `${format.abr}k` : null,
+					].filter(Boolean).join(' - ');
 					return {
-						text: `Audio Only (${format.abr}k)`,
+						text: details,
 						callback_data: `audio:${format.format_id}:${info.id}`,
-					}
-				})
+					};
+				});
 
 				const keyboard = chunkArray(2, [...formatButtons, ...audioButtons])
 
