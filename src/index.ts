@@ -20,6 +20,7 @@ import { chunkArray, removeHashtagsMentions } from "./util"
 const queue = new Queue()
 const updater = new Updater()
 
+// group & private chat middleware
 bot.use(async (ctx, next) => {
 	if (ctx.chat?.type === "private") {
 		return await next()
@@ -31,22 +32,31 @@ bot.use(async (ctx, next) => {
 	}
 })
 
-//? filter out messages from non-whitelisted users
-bot.on("message:text", async (ctx) => {
-	// Filter out messages from non-whitelisted users
-	if (WHITELISTED_IDS.length > 0 && !WHITELISTED_IDS.includes(ctx.from?.id ?? 0)) {
-		const deniedResponse = await ctx.replyWithHTML(t.deniedMessage, {
-			link_preview_options: { is_disabled: true },
-		});
+// whitelist middleware
+bot.use(async (ctx, next) => {
+	if (WHITELISTED_IDS.length === 0) {
+		return await next();
+	}
 
-		await Promise.all([
-			(async () => {
-				if (ctx.from.language_code && ctx.from.language_code !== "en") {
-					const translated = await translateText(
-						t.deniedMessage,
-						ctx.from.language_code,
-					);
-					if (translated === t.deniedMessage) return;
+	const fromId = ctx.from?.id;
+	if (fromId && WHITELISTED_IDS.includes(fromId)) {
+		return await next();
+	}
+
+	// deny access
+	const deniedResponse = await ctx.replyWithHTML(t.deniedMessage, {
+		link_preview_options: { is_disabled: true },
+	});
+
+	await Promise.all([
+		(async () => {
+			if (ctx.from?.language_code && ctx.from.language_code !== "en") {
+				const translated = await translateText(
+					t.deniedMessage,
+					ctx.from.language_code,
+				);
+				if (translated === t.deniedMessage) return;
+				if (ctx.chat) {
 					await bot.api.editMessageText(
 						ctx.chat.id,
 						deniedResponse.message_id,
@@ -54,8 +64,10 @@ bot.on("message:text", async (ctx) => {
 						{ parse_mode: "HTML", link_preview_options: { is_disabled: true } },
 					);
 				}
-			})(),
-			(async () => {
+			}
+		})(),
+		(async () => {
+			if (ctx.chat?.id) {
 				const forwarded = await ctx.forwardMessage(ADMIN_ID, {
 					disable_notification: true,
 				});
@@ -64,11 +76,48 @@ bot.on("message:text", async (ctx) => {
 					forwarded.message_id,
 					[{ type: "emoji", emoji: "🖕" }],
 				);
-			})(),
-		]);
-		return;
-	}
+			}
+		})(),
+	]);
+});
 
+
+bot.command("version", async (ctx) => {
+	try {
+		const { stdout: version } = await execa("yt-dlp", ["--version"]);
+		await ctx.replyWithHTML(`yt-dlp version: <code>${version}</code>`);
+	} catch (error) {
+		console.error(error);
+		if (ctx.chat) await errorMessage(ctx.chat, "Failed to get yt-dlp version.");
+	}
+});
+
+bot.command("update", async (ctx) => {
+	const updateMessage = await ctx.replyWithHTML("⏳ Actualizando yt-dlp...");
+	try {
+		const newVersion = await updater.update();
+		if (ctx.chat && newVersion) {
+			await bot.api.editMessageText(
+				ctx.chat.id,
+				updateMessage.message_id,
+				`✅ yt-dlp actualizado a la versión: <code>${newVersion}</code>`
+			);
+		}
+	} catch (error) {
+		console.error(error);
+		if (ctx.chat) {
+			await bot.api.editMessageText(
+				ctx.chat.id,
+				updateMessage.message_id,
+				"❌ Error al actualizar yt-dlp."
+			);
+			await errorMessage(ctx.chat, error?.toString());
+		}
+	}
+});
+
+
+bot.on("message:text", async (ctx) => {
 	// Maintenance notice
 	if (updater.updating) {
 		const maintenanceNotice = await ctx.replyWithHTML(t.maintenanceNotice);
@@ -171,9 +220,7 @@ bot.on("message:text", async (ctx) => {
 			const title = removeHashtagsMentions(info.title ?? "")
 
 			const formats = info.formats?.filter((f) => f.vcodec !== "none") ?? []
-			const audioFormats =
-				info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ??
-				[]
+			audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
 			if (formats.length > 0) {
 				const formatButtons = formats.map((format) => {
@@ -211,7 +258,7 @@ bot.on("message:text", async (ctx) => {
 						? {
 								message_id: ctx.message.message_id,
 								allow_sending_without_reply: true,
-						  }
+							}
 						: undefined,
 				})
 			} else if (audioFormats.length > 0) {
@@ -234,7 +281,7 @@ bot.on("message:text", async (ctx) => {
 						? {
 								message_id: ctx.message.message_id,
 								allow_sending_without_reply: true,
-						  }
+							}
 						: undefined,
 				})
 			} else {
@@ -253,23 +300,6 @@ bot.on("message:text", async (ctx) => {
 	})
 })
 
-bot.command("version", async (ctx) => {
-	try {
-		const { stdout: version } = await execa("yt-dlp", ["--version"]);
-		ctx.replyWithHTML(`yt-dlp version: <code>${version}</code>`);
-	} catch (error) {
-		console.error(error);
-		if (ctx.chat) await errorMessage(ctx.chat, error?.toString());
-	}
-});
-
-bot.command("update", async (ctx) => {
-	await updater.update();
-	ctx.replyWithHTML("yt-dlp has been updated.");
-});
-
-
-
 bot.on("callback_query:data", async (ctx) => {
 	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
 
@@ -283,10 +313,10 @@ bot.on("callback_query:data", async (ctx) => {
 		try {
 			if (ctx.chat) {
 				await bot.api.editMessageText(
-				ctx.chat.id,
-				processingMessage.message_id,
-				"✅ Opción seleccionada. Obteniendo información..."
-			);
+					ctx.chat.id,
+					processingMessage.message_id,
+					"✅ Opción seleccionada. Obteniendo información..."
+				);
 			}
 
 			const info = await getInfo(`https://www.youtube.com/watch?v=${videoId}`, [
@@ -301,7 +331,7 @@ bot.on("callback_query:data", async (ctx) => {
 				if (percentage > lastPercentage) {
 					lastPercentage = percentage;
 					if (ctx.chat) {
-						bot.api.editMessageText(
+						await bot.api.editMessageText(
 							ctx.chat.id,
 							processingMessage.message_id,
 							`📥 Descargando... ${percentage}%`
