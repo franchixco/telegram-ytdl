@@ -281,11 +281,13 @@ bot.on("callback_query:data", async (ctx) => {
 
 	queue.add(async () => {
 		try {
-			await bot.api.editMessageText(
+			if (ctx.chat) {
+				await bot.api.editMessageText(
 				ctx.chat.id,
 				processingMessage.message_id,
 				"✅ Opción seleccionada. Obteniendo información..."
 			);
+			}
 
 			const info = await getInfo(`https://www.youtube.com/watch?v=${videoId}`, [
 				"--no-playlist",
@@ -298,11 +300,13 @@ bot.on("callback_query:data", async (ctx) => {
 			const updateProgress = (percentage: number) => {
 				if (percentage > lastPercentage) {
 					lastPercentage = percentage;
-					bot.api.editMessageText(
-						ctx.chat.id,
-						processingMessage.message_id,
-						`📥 Descargando... ${percentage}%`
-					).catch(console.error);
+					if (ctx.chat) {
+						bot.api.editMessageText(
+							ctx.chat.id,
+							processingMessage.message_id,
+							`📥 Descargando... ${percentage}%`
+						).catch(console.error);
+					}
 				}
 			};
 
@@ -319,11 +323,13 @@ bot.on("callback_query:data", async (ctx) => {
 					}
 				});
 				stream.stderr?.on("end", () => {
-					bot.api.editMessageText(
-						ctx.chat.id,
-						processingMessage.message_id,
-						'📤 Subiendo a Telegram...'
-					).catch(console.error);
+					if (ctx.chat) {
+						await bot.api.editMessageText(
+							ctx.chat.id,
+							processingMessage.message_id,
+							'📤 Subiendo a Telegram...'
+						).catch(console.error);
+					}
 				});
 				return stream.stdout;
 			};
