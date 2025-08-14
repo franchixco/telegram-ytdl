@@ -322,7 +322,7 @@ bot.on("callback_query:data", async (ctx) => {
 						}
 					}
 				});
-				stream.stderr?.on("end", () => {
+				stream.stderr?.on("end", async () => {
 					if (ctx.chat) {
 						await bot.api.editMessageText(
 							ctx.chat.id,
