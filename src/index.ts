@@ -343,6 +343,7 @@ bot.on("callback_query:data", async (ctx) => {
 					caption: title,
 					supports_streaming: true,
 					duration: info.duration ?? 0,
+					thumbnail: getThumbnail(info.thumbnails),
 					reply_parameters: {
 						message_id: ctx.callbackQuery.message?.message_id ?? 0,
 						allow_sending_without_reply: true,
