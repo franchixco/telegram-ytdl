@@ -1,5 +1,6 @@
-import { downloadFromInfo, getInfo } from "@resync-tv/yt-dlp"
-import { InputFile } from "grammy"
+import { downloadFromInfo, getInfo } from "@resync-tv/yt-dlp";
+import { execa } from "execa";
+import { InputFile } from "grammy";
 import { deleteMessage, errorMessage } from "./bot-util"
 import { cobaltMatcher, cobaltResolver } from "./cobalt"
 import { link, t, tiktokArgs } from "./constants"
@@ -31,60 +32,76 @@ bot.use(async (ctx, next) => {
 })
 
 //? filter out messages from non-whitelisted users
-bot.on("message:text", async (ctx, next) => {
-	if (WHITELISTED_IDS.length === 0) return await next()
-	if (WHITELISTED_IDS.includes(ctx.from?.id)) return await next()
+bot.on("message:text", async (ctx) => {
+	// Filter out messages from non-whitelisted users
+	if (WHITELISTED_IDS.length > 0 && !WHITELISTED_IDS.includes(ctx.from?.id ?? 0)) {
+		const deniedResponse = await ctx.replyWithHTML(t.deniedMessage, {
+			link_preview_options: { is_disabled: true },
+		});
 
-	const deniedResponse = await ctx.replyWithHTML(t.deniedMessage, {
-		link_preview_options: { is_disabled: true },
-	})
+		await Promise.all([
+			(async () => {
+				if (ctx.from.language_code && ctx.from.language_code !== "en") {
+					const translated = await translateText(
+						t.deniedMessage,
+						ctx.from.language_code,
+					);
+					if (translated === t.deniedMessage) return;
+					await bot.api.editMessageText(
+						ctx.chat.id,
+						deniedResponse.message_id,
+						translated,
+						{ parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+					);
+				}
+			})(),
+			(async () => {
+				const forwarded = await ctx.forwardMessage(ADMIN_ID, {
+					disable_notification: true,
+				});
+				await bot.api.setMessageReaction(
+					forwarded.chat.id,
+					forwarded.message_id,
+					[{ type: "emoji", emoji: "🖕" }],
+				);
+			})(),
+		]);
+		return;
+	}
 
-	await Promise.all([
-		(async () => {
-			if (ctx.from.language_code && ctx.from.language_code !== "en") {
-				const translated = await translateText(
-					t.deniedMessage,
-					ctx.from.language_code,
-				)
-				if (translated === t.deniedMessage) return
-				await bot.api.editMessageText(
-					ctx.chat.id,
-					deniedResponse.message_id,
-					translated,
-					{ parse_mode: "HTML", link_preview_options: { is_disabled: true } },
-				)
-			}
-		})(),
-		(async () => {
-			const forwarded = await ctx.forwardMessage(ADMIN_ID, {
-				disable_notification: true,
-			})
-			await bot.api.setMessageReaction(
-				forwarded.chat.id,
-				forwarded.message_id,
-				[{ type: "emoji", emoji: "🖕" }],
+	// Maintenance notice
+	if (updater.updating) {
+		const maintenanceNotice = await ctx.replyWithHTML(t.maintenanceNotice);
+		await updater.updating;
+		await deleteMessage(maintenanceNotice);
+	}
+
+	const urlEntity = ctx.message?.entities?.find((e) => e.type === "url");
+	if (!urlEntity) {
+		const response = await ctx.replyWithHTML(t.urlReminder);
+
+		if (ctx.from.language_code && ctx.from.language_code !== "en") {
+			const translated = await translateText(
+				t.urlReminder,
+				ctx.from.language_code,
 			)
-		})(),
-	])
-})
+			if (translated === t.urlReminder) return
+			await bot.api.editMessageText(
+				ctx.chat.id,
+				response.message_id,
+				translated,
+				{ parse_mode: "HTML", link_preview_options: { is_disabled: true } },
+			)
+		}
+		return;
+	}
 
-bot.on("message:text", async (ctx, next) => {
-	if (updater.updating === false) return await next()
-
-	const maintenanceNotice = await ctx.replyWithHTML(t.maintenanceNotice)
-	await updater.updating
-
-	await deleteMessage(maintenanceNotice)
-	await next()
-})
-
-bot.on("message:text").on("::url", async (ctx, next) => {
-	const [url] = ctx.entities("url")
-	if (!url) return await next()
+	const url = ctx.message?.text?.substring(urlEntity.offset, urlEntity.offset + urlEntity.length);
+	if (!url) return;
 
 	const processingMessage = await ctx.replyWithHTML(t.processing, {
 		disable_notification: true,
-	})
+	});
 
 	if (ctx.chat.id !== ADMIN_ID) {
 		ctx
@@ -94,16 +111,18 @@ bot.on("message:text").on("::url", async (ctx, next) => {
 					forwarded.chat.id,
 					forwarded.message_id,
 					[{ type: "emoji", emoji: "🤝" }],
-				)
-			})
+				);
+			});
 	}
 
+
+	const useCobalt = cobaltMatcher(url)
 	const useCobaltResolver = async () => {
 		try {
-			const resolved = await cobaltResolver(url.text)
+			const resolved = await cobaltResolver(url)
 
 			if (resolved.status === "error") {
-				throw resolved.error
+				throw new Error(resolved.error.code)
 			}
 
 			if (resolved.status === "picker") {
@@ -135,51 +154,57 @@ bot.on("message:text").on("::url", async (ctx, next) => {
 
 	queue.add(async () => {
 		try {
-			const isTiktok = urlMatcher(url.text, "tiktok.com")
-			const isYouTubeMusic = urlMatcher(url.text, "music.youtube.com")
-			const useCobalt = cobaltMatcher(url.text)
+			const isTiktok = urlMatcher(url, "tiktok.com")
+			const isYouTubeMusic = urlMatcher(url, "music.youtube.com")
 			const additionalArgs = isTiktok ? tiktokArgs : []
 
 			if (useCobalt) {
-				if (await useCobaltResolver()) return
+				if (await useCobaltResolver()) return;
 			}
 
-			// -----------------------------------------------------------------------------
-
-			const info = await getInfo(url.text, [
-				"-f",
-				"b",
+			const info = await getInfo(url, [
 				"--no-playlist",
 				...(await cookieArgs()),
 				...additionalArgs,
 			])
 
-			const [download] = info.requested_downloads ?? []
-			if (!download || !download.url) throw new Error("No download available")
+			const title = removeHashtagsMentions(info.title ?? "")
 
-			const title = removeHashtagsMentions(info.title)
+			const formats = info.formats?.filter((f) => f.vcodec !== "none") ?? []
+			const audioFormats =
+				info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ??
+				[]
 
-			if (download.vcodec !== "none" && !isYouTubeMusic) {
-				let video: InputFile | string
-
-				if (isTiktok) {
-					const stream = downloadFromInfo(info, "-")
-					video = new InputFile(stream.stdout, title)
-				} else {
-					video = new InputFile({ url: download.url }, title)
-				}
-
-				await ctx.replyWithVideo(video, {
-					caption: title,
-					supports_streaming: true,
-					duration: info.duration,
-					reply_parameters: {
-						message_id: ctx.message?.message_id,
-						allow_sending_without_reply: true,
-					},
+			if (formats.length > 0) {
+				const formatButtons = formats.map((format) => {
+					return {
+						text: `${format.format_note} (${format.resolution})`,
+						callback_data: `format:${format.format_id}:${info.id}`,
+					}
 				})
-			} else if (download.acodec !== "none") {
+
+				const audioButtons = audioFormats.map((format) => {
+					return {
+						text: `Audio Only (${format.abr}k)`,
+						callback_data: `audio:${format.format_id}:${info.id}`,
+					}
+				})
+
+				const keyboard = chunkArray(2, [...formatButtons, ...audioButtons])
+
+				await ctx.replyWithHTML(title ?? "", {
+					reply_markup: { inline_keyboard: keyboard },
+					reply_parameters: ctx.message
+						? {
+								message_id: ctx.message.message_id,
+								allow_sending_without_reply: true,
+						  }
+						: undefined,
+				})
+			} else if (audioFormats.length > 0) {
 				const stream = downloadFromInfo(info, "-", [
+					"-f",
+					audioFormats[0]?.format_id ?? "",
 					"-x",
 					"--audio-format",
 					"mp3",
@@ -188,44 +213,113 @@ bot.on("message:text").on("::url", async (ctx, next) => {
 
 				await ctx.replyWithAudio(audio, {
 					caption: title,
-					performer: info.uploader,
-					title: info.title,
+					performer: info.uploader ?? "",
+					title: info.title ?? "",
 					thumbnail: getThumbnail(info.thumbnails),
-					duration: info.duration,
-					reply_parameters: {
-						message_id: ctx.message?.message_id,
-						allow_sending_without_reply: true,
-					},
+					duration: info.duration ?? 0,
+					reply_parameters: ctx.message
+						? {
+								message_id: ctx.message.message_id,
+								allow_sending_without_reply: true,
+						  }
+						: undefined,
 				})
 			} else {
-				if (await useCobaltResolver()) return
-				throw new Error("No download available")
+				if (ctx.chat) await errorMessage(ctx.chat, "No download available")
 			}
 		} catch (error) {
-			if (await useCobaltResolver()) return
-			return error instanceof Error
-				? errorMessage(ctx.chat, error.message)
-				: errorMessage(ctx.chat, `Couldn't download ${url}`)
+			if (useCobalt && (await useCobaltResolver())) return;
+			if (ctx.chat) {
+				return error instanceof Error
+					? errorMessage(ctx.chat, error.message)
+					: errorMessage(ctx.chat, `Couldn't download ${url}`);
+			}
 		} finally {
 			await deleteMessage(processingMessage)
 		}
 	})
 })
 
-bot.on("message:text", async (ctx) => {
-	const response = await ctx.replyWithHTML(t.urlReminder)
-
-	if (ctx.from.language_code && ctx.from.language_code !== "en") {
-		const translated = await translateText(
-			t.urlReminder,
-			ctx.from.language_code,
-		)
-		if (translated === t.urlReminder) return
-		await bot.api.editMessageText(
-			ctx.chat.id,
-			response.message_id,
-			translated,
-			{ parse_mode: "HTML", link_preview_options: { is_disabled: true } },
-		)
+bot.command("version", async (ctx) => {
+	try {
+		const { stdout: version } = await execa("yt-dlp", ["--version"]);
+		ctx.replyWithHTML(`yt-dlp version: <code>${version}</code>`);
+	} catch (error) {
+		console.error(error);
+		if (ctx.chat) await errorMessage(ctx.chat, error?.toString());
 	}
+});
+
+bot.command("update", async (ctx) => {
+	await updater.update();
+	ctx.replyWithHTML("yt-dlp has been updated.");
+});
+
+
+
+bot.on("callback_query:data", async (ctx) => {
+	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":")
+
+	const processingMessage = await ctx.replyWithHTML(t.processing, {
+		disable_notification: true,
+	})
+
+	queue.add(async () => {
+		try {
+			const info = await getInfo(`https://www.youtube.com/watch?v=${videoId}`, [
+				"--no-playlist",
+				...(await cookieArgs()),
+			])
+
+			const title = removeHashtagsMentions(info.title ?? "")
+
+			if (type === "format") {
+				if (!formatId) throw new Error("Invalid format ID")
+				const stream = downloadFromInfo(info, "-", ["-f", formatId])
+				const video = new InputFile(stream.stdout, title)
+
+				await ctx.replyWithVideo(video, {
+					caption: title,
+					supports_streaming: true,
+					duration: info.duration ?? 0,
+					reply_parameters: {
+						message_id: ctx.callbackQuery.message?.message_id ?? 0,
+						allow_sending_without_reply: true,
+					},
+				})
+			} else if (type === "audio") {
+				const stream = downloadFromInfo(info, "-", [
+					"-f",
+					formatId ?? "",
+					"-x",
+					"--audio-format",
+					"mp3",
+				])
+				const audio = new InputFile(stream.stdout)
+
+				await ctx.replyWithAudio(audio, {
+					caption: title,
+					performer: info.uploader ?? "",
+					title: info.title ?? "",
+					thumbnail: getThumbnail(info.thumbnails),
+					duration: info.duration ?? 0,
+					reply_parameters: {
+						message_id: ctx.callbackQuery.message?.message_id ?? 0,
+						allow_sending_without_reply: true,
+					},
+				})
+			}
+		} catch (error) {
+			console.error(error)
+			if (ctx.chat) await errorMessage(ctx.chat, error?.toString())
+		} finally {
+			await deleteMessage(processingMessage)
+		}
+	})
 })
+
+bot.catch((error) => {
+	console.error("Error in bot", error);
+});
+
+bot.start();
