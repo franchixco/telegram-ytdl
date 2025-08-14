@@ -40,5 +40,5 @@ jobs:
 
       - name: "Build Image"
         run: |
-          docker build . --tag ghcr.io/vaaski/telegram-ytdl:latest
-          docker push ghcr.io/vaaski/telegram-ytdl:latest
+          docker build . --tag ghcr.io/franchixco/telegram-ytdl:latest
+          docker push ghcr.io/franchixco/telegram-ytdl:latest
