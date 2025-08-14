@@ -271,6 +271,8 @@ bot.command("update", async (ctx) => {
 
 
 bot.on("callback_query:data", async (ctx) => {
+	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+
 	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":")
 
 	const processingMessage = await ctx.replyWithHTML(t.processing, {
@@ -279,6 +281,12 @@ bot.on("callback_query:data", async (ctx) => {
 
 	queue.add(async () => {
 		try {
+			await bot.api.editMessageText(
+				ctx.chat.id,
+				processingMessage.message_id,
+				"✅ Opción seleccionada. Obteniendo información..."
+			);
+
 			const info = await getInfo(`https://www.youtube.com/watch?v=${videoId}`, [
 				"--no-playlist",
 				...(await cookieArgs()),
@@ -286,10 +294,44 @@ bot.on("callback_query:data", async (ctx) => {
 
 			const title = removeHashtagsMentions(info.title ?? "")
 
+			let lastPercentage = -1;
+			const updateProgress = (percentage: number) => {
+				if (percentage > lastPercentage) {
+					lastPercentage = percentage;
+					bot.api.editMessageText(
+						ctx.chat.id,
+						processingMessage.message_id,
+						`📥 Descargando... ${percentage}%`
+					).catch(console.error);
+				}
+			};
+
+			const downloadStream = (args: string[]) => {
+				const stream = downloadFromInfo(info, "-", args);
+				stream.stderr?.on("data", (data) => {
+					const text = data.toString();
+					const match = text.match(/\\[download\\\\]\\s+([0-9.]+)%/);
+					if (match) {
+						const percentage = Math.floor(parseFloat(match[1]));
+						if (percentage % 5 === 0 || percentage === 100) {
+							updateProgress(percentage);
+						}
+					}
+				});
+				stream.stderr?.on("end", () => {
+					bot.api.editMessageText(
+						ctx.chat.id,
+						processingMessage.message_id,
+						'📤 Subiendo a Telegram...'
+					).catch(console.error);
+				});
+				return stream.stdout;
+			};
+
 			if (type === "format") {
 				if (!formatId) throw new Error("Invalid format ID")
-				const stream = downloadFromInfo(info, "-", ["-f", formatId])
-				const video = new InputFile(stream.stdout, title)
+				const videoStream = downloadStream(["-f", formatId]);
+				const video = new InputFile(videoStream, title)
 
 				await ctx.replyWithVideo(video, {
 					caption: title,
@@ -301,14 +343,14 @@ bot.on("callback_query:data", async (ctx) => {
 					},
 				})
 			} else if (type === "audio") {
-				const stream = downloadFromInfo(info, "-", [
+				const audioStream = downloadStream([
 					"-f",
 					formatId ?? "",
 					"-x",
 					"--audio-format",
 					"mp3",
-				])
-				const audio = new InputFile(stream.stdout)
+				]);
+				const audio = new InputFile(audioStream)
 
 				await ctx.replyWithAudio(audio, {
 					caption: title,
