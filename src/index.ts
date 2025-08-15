@@ -1,4 +1,4 @@
-import { downloadFromInfo, getInfo } from "@resync-tv/yt-dlp";
+import { downloadFromInfo, getInfo, type ytDlpInfo } from "@resync-tv/yt-dlp";
 import { execa } from "execa";
 import { InputFile } from "grammy";
 import { deleteMessage, errorMessage } from "./bot-util"
@@ -220,7 +220,7 @@ bot.on("message:text", async (ctx) => {
 			const title = removeHashtagsMentions(info.title ?? "")
 
 			const formats = info.formats?.filter((f) => f.vcodec !== "none") ?? []
-			audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
+			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
 			if (formats.length > 0) {
 				const formatButtons = formats.map((format) => {
@@ -327,7 +327,7 @@ bot.on("callback_query:data", async (ctx) => {
 			const title = removeHashtagsMentions(info.title ?? "")
 
 			let lastPercentage = -1;
-			const updateProgress = (percentage: number) => {
+			const updateProgress = async (percentage: number) => {
 				if (percentage > lastPercentage) {
 					lastPercentage = percentage;
 					if (ctx.chat) {
@@ -344,7 +344,7 @@ bot.on("callback_query:data", async (ctx) => {
 				const stream = downloadFromInfo(info, "-", args);
 				stream.stderr?.on("data", (data) => {
 					const text = data.toString();
-					const match = text.match(/\\[download\\\\]\\s+([0-9.]+)%/);
+					const match = text.match(/\[download\]\s+([0-9.]+)%/);
 					if (match) {
 						const percentage = Math.floor(parseFloat(match[1]));
 						if (percentage % 5 === 0 || percentage === 100) {
