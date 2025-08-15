@@ -5,7 +5,7 @@ import { YTDL_AUTOUPDATE } from "./environment"
 
 export class Updater {
 	public readonly enabled = YTDL_AUTOUPDATE
-	public updating: Promise<string | void> | false = false
+	public updating: Promise<string | undefined> | false = false
 
 	#job: Cron | null = null
 
