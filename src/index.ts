@@ -305,6 +305,12 @@ bot.on("callback_query:data", async (ctx) => {
 	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
 
 	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":");
+
+	if (!videoId) {
+		if (ctx.chat) await errorMessage(ctx.chat, "Invalid video ID");
+		return;
+	}
+
 	const url = Buffer.from(videoId, "base64").toString("ascii");
 
 	const processingMessage = await ctx.replyWithHTML(t.processing, {
