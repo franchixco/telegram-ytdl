@@ -16,6 +16,7 @@ import { bot } from "./setup"
 import { translateText } from "./translate"
 import { Updater } from "./updater"
 import { chunkArray, removeHashtagsMentions } from "./util"
+import { getUrl, storeUrl } from "./url-storage"
 
 const queue = new Queue()
 const updater = new Updater()
@@ -223,7 +224,7 @@ bot.on("message:text", async (ctx) => {
 			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
 			if (formats.length > 0) {
-				const encodedUrl = Buffer.from(url).toString("base64");
+				const urlId = storeUrl(url);
 				const formatButtons = formats.map((format) => {
 					const details = [
 						format.resolution,
@@ -234,7 +235,7 @@ bot.on("message:text", async (ctx) => {
 					].filter(Boolean).join(' - ');
 					return {
 						text: details,
-						callback_data: `format:${format.format_id}:${encodedUrl}`,
+						callback_data: `format:${format.format_id}:${urlId}`,
 					};
 				});
 
@@ -247,7 +248,7 @@ bot.on("message:text", async (ctx) => {
 					].filter(Boolean).join(' - ');
 					return {
 						text: details,
-						callback_data: `audio:${format.format_id}:${encodedUrl}`,
+						callback_data: `audio:${format.format_id}:${urlId}`,
 					};
 				});
 
@@ -304,14 +305,19 @@ bot.on("message:text", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
 	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
 
-	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":");
+	const [type, formatId, urlId] = ctx.callbackQuery.data.split(":");
 
-	if (!videoId) {
+	if (!urlId) {
 		if (ctx.chat) await errorMessage(ctx.chat, "Invalid video ID");
 		return;
 	}
 
-	const url = Buffer.from(videoId, "base64").toString("ascii");
+	const url = getUrl(urlId);
+
+	if (!url) {
+		if (ctx.chat) await errorMessage(ctx.chat, "URL not found");
+		return;
+	}
 
 	const processingMessage = await ctx.replyWithHTML(t.processing, {
 		disable_notification: true,
