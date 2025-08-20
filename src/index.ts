@@ -374,14 +374,19 @@ bot.on("callback_query:data", async (ctx) => {
 
 			if (type === "format") {
 				if (!formatId) throw new Error("Invalid format ID")
-				const videoStream = downloadStream(["-f", formatId]);
+				const videoStream = downloadStream([
+					"-f",
+					formatId,
+					"--concurrent-fragments",
+					"10",
+					"--write-thumbnail",
+				]);
 				const video = new InputFile(videoStream, title)
 
 				await ctx.replyWithVideo(video, {
 					caption: title,
 					supports_streaming: true,
 					duration: info.duration ?? 0,
-					thumbnail: getThumbnail(info.thumbnails),
 					reply_parameters: {
 						message_id: ctx.callbackQuery.message?.message_id ?? 0,
 						allow_sending_without_reply: true,
@@ -391,6 +396,8 @@ bot.on("callback_query:data", async (ctx) => {
 				const audioStream = downloadStream([
 					"-f",
 					formatId ?? "",
+					"--concurrent-fragments",
+					"10",
 					"-x",
 					"--audio-format",
 					"mp3",
