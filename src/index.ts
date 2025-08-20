@@ -223,6 +223,7 @@ bot.on("message:text", async (ctx) => {
 			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
 			if (formats.length > 0) {
+				const encodedUrl = Buffer.from(url).toString("base64");
 				const formatButtons = formats.map((format) => {
 					const details = [
 						format.resolution,
@@ -233,7 +234,7 @@ bot.on("message:text", async (ctx) => {
 					].filter(Boolean).join(' - ');
 					return {
 						text: details,
-						callback_data: `format:${format.format_id}:${info.id}`,
+						callback_data: `format:${format.format_id}:${encodedUrl}`,
 					};
 				});
 
@@ -246,7 +247,7 @@ bot.on("message:text", async (ctx) => {
 					].filter(Boolean).join(' - ');
 					return {
 						text: details,
-						callback_data: `audio:${format.format_id}:${info.id}`,
+						callback_data: `audio:${format.format_id}:${encodedUrl}`,
 					};
 				});
 
@@ -303,7 +304,8 @@ bot.on("message:text", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
 	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
 
-	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":")
+	const [type, formatId, videoId] = ctx.callbackQuery.data.split(":");
+	const url = Buffer.from(videoId, "base64").toString("ascii");
 
 	const processingMessage = await ctx.replyWithHTML(t.processing, {
 		disable_notification: true,
@@ -319,7 +321,7 @@ bot.on("callback_query:data", async (ctx) => {
 				);
 			}
 
-			const info = await getInfo(`https://www.youtube.com/watch?v=${videoId}`, [
+			const info = await getInfo(url, [
 				"--no-playlist",
 				...(await cookieArgs()),
 			])
