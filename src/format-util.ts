@@ -1,19 +1,17 @@
 import type { ytDlpInfo } from "@resync-tv/yt-dlp";
 
-export const findVideoFormat = (formats: ytDlpInfo.Format[], height: number): ytDlpInfo.Format | undefined => {
+export const findBestVideoFormat = (formats: ytDlpInfo.Format[]): ytDlpInfo.Format | undefined => {
   const videoFormats = formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none');
 
-  const preferredFormats = videoFormats.filter(f =>
-    f.ext === 'mp4' && f.vcodec?.startsWith('avc')
-  );
+  const h264Formats = videoFormats.filter(f => f.vcodec?.includes('h264') || f.vcodec?.startsWith('avc'));
 
-  if (preferredFormats.length > 0) {
-    const format = preferredFormats.find(f => f.height === height);
-    if (format) return format;
+  if (h264Formats.length > 0) {
+    // Sort by height and return the best one
+    return h264Formats.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0];
   }
 
-  // Fallback to any format with the given height
-  return videoFormats.find(f => f.height === height);
+  // Fallback to any video format
+  return videoFormats.sort((a, b) => (b.height ?? 0) - (a.height ?? 0))[0];
 };
 
 export const findBestAudioFormat = (formats: ytDlpInfo.Format[]): ytDlpInfo.Format | undefined => {

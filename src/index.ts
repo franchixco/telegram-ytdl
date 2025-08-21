@@ -17,7 +17,7 @@ import { translateText } from "./translate"
 import { Updater } from "./updater"
 import { chunkArray, removeHashtagsMentions } from "./util"
 import { getUrl, storeUrl } from "./url-storage"
-import { findVideoFormat, findBestAudioFormat } from "./format-util"
+import { findBestVideoFormat, findBestAudioFormat } from "./format-util"
 
 const queue = new Queue()
 const updater = new Updater()
@@ -222,32 +222,29 @@ bot.on("message:text", async (ctx) => {
 			const title = removeHashtagsMentions(info.title ?? "")
 
 			const formats = info.formats ?? [];
-			const format1080 = findVideoFormat(formats, 1080);
-			const format720 = findVideoFormat(formats, 720);
+			const bestVideo = findBestVideoFormat(formats);
 			const bestAudio = findBestAudioFormat(formats);
 			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
-			if (format1080 || format720 || bestAudio) {
+			if (bestVideo || bestAudio) {
 				const urlId = storeUrl(url);
 				const buttons = [];
-				if (format1080) {
+				if (bestVideo) {
 					buttons.push({
-						text: "Video 1080p",
-						callback_data: `format:${format1080.format_id}:${urlId}`,
-					});
-				}
-				if (format720) {
-					buttons.push({
-						text: "Video 720p",
-						callback_data: `format:${format720.format_id}:${urlId}`,
+						text: `Best Video (${bestVideo.height}p)`,
+						callback_data: `format:${bestVideo.format_id}:${urlId}`,
 					});
 				}
 				if (bestAudio) {
 					buttons.push({
-						text: `Audio (${bestAudio.ext})`,
+						text: "Best Audio",
 						callback_data: `audio:${bestAudio.format_id}:${urlId}`,
 					});
 				}
+				buttons.push({
+					text: "More Options",
+					callback_data: `more::${urlId}`,
+				});
 
 				const keyboard = [buttons]
 
@@ -303,6 +300,52 @@ bot.on("callback_query:data", async (ctx) => {
 	await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
 
 	const [type, formatId, urlId] = ctx.callbackQuery.data.split(":");
+
+  if (type === "more") {
+    const url = getUrl(urlId);
+    if (!url) {
+      if (ctx.chat) await errorMessage(ctx.chat, "URL not found");
+      return;
+    }
+    const info = await getInfo(url, [
+      "--no-playlist",
+      ...(await cookieArgs()),
+    ]);
+
+    const formats = info.formats?.filter((f) => f.vcodec !== "none") ?? []
+    const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
+
+    const formatButtons = formats.map((format) => {
+      const details = [
+        format.resolution,
+        format.ext,
+        format.vcodec,
+        format.acodec !== 'none' ? format.acodec : null,
+        format.format_note
+      ].filter(Boolean).join(' - ');
+      return {
+        text: details,
+        callback_data: `format:${format.format_id}:${urlId}`,
+      };
+    });
+
+    const audioButtons = audioFormats.map((format) => {
+      const details = [
+        'Audio',
+        format.ext,
+        format.acodec,
+        format.abr ? `${format.abr}k` : null,
+      ].filter(Boolean).join(' - ');
+      return {
+        text: details,
+        callback_data: `audio:${format.format_id}:${urlId}`,
+      };
+    });
+
+    const keyboard = chunkArray(2, [...formatButtons, ...audioButtons])
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: keyboard } });
+    return;
+  }
 
 	if (!urlId) {
 		if (ctx.chat) await errorMessage(ctx.chat, "Invalid video ID");
