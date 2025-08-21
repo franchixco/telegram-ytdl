@@ -232,13 +232,13 @@ bot.on("message:text", async (ctx) => {
 				const buttons = [];
 				if (format1080) {
 					buttons.push({
-						text: `Video 1080p`,
+						text: "Video 1080p",
 						callback_data: `format:${format1080.format_id}:${urlId}`,
 					});
 				}
 				if (format720) {
 					buttons.push({
-						text: `Video 720p`,
+						text: "Video 720p",
 						callback_data: `format:${format720.format_id}:${urlId}`,
 					});
 				}
