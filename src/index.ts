@@ -224,6 +224,7 @@ bot.on("message:text", async (ctx) => {
 			const formats = info.formats ?? [];
 			const bestVideo = findBestVideoFormat(formats);
 			const bestAudio = findBestAudioFormat(formats);
+			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
 			if (bestVideo || bestAudio) {
 				const urlId = storeUrl(url);
@@ -252,7 +253,7 @@ bot.on("message:text", async (ctx) => {
 							}
 						: undefined,
 				})
-			} else {
+			} else if (audioFormats.length > 0) {
 				const stream = downloadFromInfo(info, "-", [
 					"-f",
 					audioFormats[0]?.format_id ?? "",
