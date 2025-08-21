@@ -17,6 +17,7 @@ import { translateText } from "./translate"
 import { Updater } from "./updater"
 import { chunkArray, removeHashtagsMentions } from "./util"
 import { getUrl, storeUrl } from "./url-storage"
+import { findBestVideoFormat, findBestAudioFormat } from "./format-util"
 
 const queue = new Queue()
 const updater = new Updater()
@@ -220,39 +221,27 @@ bot.on("message:text", async (ctx) => {
 
 			const title = removeHashtagsMentions(info.title ?? "")
 
-			const formats = info.formats?.filter((f) => f.vcodec !== "none") ?? []
-			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
+			const formats = info.formats ?? [];
+			const bestVideo = findBestVideoFormat(formats);
+			const bestAudio = findBestAudioFormat(formats);
 
-			if (formats.length > 0) {
+			if (bestVideo || bestAudio) {
 				const urlId = storeUrl(url);
-				const formatButtons = formats.map((format) => {
-					const details = [
-						format.resolution,
-						format.ext,
-						format.vcodec,
-						format.acodec !== 'none' ? format.acodec : null,
-						format.format_note
-					].filter(Boolean).join(' - ');
-					return {
-						text: details,
-						callback_data: `format:${format.format_id}:${urlId}`,
-					};
-				});
+				const buttons = [];
+				if (bestVideo) {
+					buttons.push({
+						text: `Best Video (${bestVideo.height}p, ${bestVideo.ext})`,
+						callback_data: `format:${bestVideo.format_id}:${urlId}`,
+					});
+				}
+				if (bestAudio) {
+					buttons.push({
+						text: `Best Audio (${bestAudio.ext})`,
+						callback_data: `audio:${bestAudio.format_id}:${urlId}`,
+					});
+				}
 
-				const audioButtons = audioFormats.map((format) => {
-					const details = [
-						'Audio',
-						format.ext,
-						format.acodec,
-						format.abr ? `${format.abr}k` : null,
-					].filter(Boolean).join(' - ');
-					return {
-						text: details,
-						callback_data: `audio:${format.format_id}:${urlId}`,
-					};
-				});
-
-				const keyboard = chunkArray(2, [...formatButtons, ...audioButtons])
+				const keyboard = [buttons]
 
 				await ctx.replyWithHTML(title ?? "", {
 					reply_markup: { inline_keyboard: keyboard },
@@ -263,7 +252,7 @@ bot.on("message:text", async (ctx) => {
 							}
 						: undefined,
 				})
-			} else if (audioFormats.length > 0) {
+			} else {
 				const stream = downloadFromInfo(info, "-", [
 					"-f",
 					audioFormats[0]?.format_id ?? "",
