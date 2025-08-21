@@ -302,6 +302,10 @@ bot.on("callback_query:data", async (ctx) => {
 	const [type, formatId, urlId] = ctx.callbackQuery.data.split(":");
 
   if (type === "more") {
+    if (!urlId) {
+      if (ctx.chat) await errorMessage(ctx.chat, "Invalid URL ID");
+      return;
+    }
     const url = getUrl(urlId);
     if (!url) {
       if (ctx.chat) await errorMessage(ctx.chat, "URL not found");
