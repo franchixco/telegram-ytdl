@@ -17,7 +17,7 @@ import { translateText } from "./translate"
 import { Updater } from "./updater"
 import { chunkArray, removeHashtagsMentions } from "./util"
 import { getUrl, storeUrl } from "./url-storage"
-import { findBestVideoFormat, findBestAudioFormat } from "./format-util"
+import { findVideoFormat, findBestAudioFormat } from "./format-util"
 
 const queue = new Queue()
 const updater = new Updater()
@@ -222,22 +222,29 @@ bot.on("message:text", async (ctx) => {
 			const title = removeHashtagsMentions(info.title ?? "")
 
 			const formats = info.formats ?? [];
-			const bestVideo = findBestVideoFormat(formats);
+			const format1080 = findVideoFormat(formats, 1080);
+			const format720 = findVideoFormat(formats, 720);
 			const bestAudio = findBestAudioFormat(formats);
 			const audioFormats = info.formats?.filter((f) => f.acodec !== "none" && f.vcodec === "none") ?? []
 
-			if (bestVideo || bestAudio) {
+			if (format1080 || format720 || bestAudio) {
 				const urlId = storeUrl(url);
 				const buttons = [];
-				if (bestVideo) {
+				if (format1080) {
 					buttons.push({
-						text: `Best Video (${bestVideo.height}p, ${bestVideo.ext})`,
-						callback_data: `format:${bestVideo.format_id}:${urlId}`,
+						text: `Video 1080p`,
+						callback_data: `format:${format1080.format_id}:${urlId}`,
+					});
+				}
+				if (format720) {
+					buttons.push({
+						text: `Video 720p`,
+						callback_data: `format:${format720.format_id}:${urlId}`,
 					});
 				}
 				if (bestAudio) {
 					buttons.push({
-						text: `Best Audio (${bestAudio.ext})`,
+						text: `Audio (${bestAudio.ext})`,
 						callback_data: `audio:${bestAudio.format_id}:${urlId}`,
 					});
 				}
